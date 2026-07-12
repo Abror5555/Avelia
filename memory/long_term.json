@@ -1,0 +1,36 @@
+{
+  "identity": {
+    "language": {
+      "value": "Uzbek",
+      "updated": "2026-07-10"
+    },
+    "name": {
+      "value": "Avelia",
+      "updated": "2026-07-10"
+    },
+    "creator": {
+      "value": "Abror",
+      "updated": "2026-07-10"
+    },
+    "creation_date": {
+      "value": "June 2026",
+      "updated": "2026-07-10"
+    }
+  },
+  "preferences": {},
+  "projects": {},
+  "relationships": {},
+  "wishes": {},
+  "notes": {
+    "task_timing": {
+      "value": "3 minutes passed since request",
+      "updated": "2026-07-10"
+    }
+  },
+  "pronunciation_errors": {
+    "uzbek_error_1": {
+      "value": "User said 'eshafsam' instead of 'eshityapsan'",
+      "updated": "2026-07-10"
+    }
+  }
+}
