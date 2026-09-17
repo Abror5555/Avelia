@@ -1,10 +1,12 @@
 """
 Local wake-word detection for AVELIA.
 
-NOTE: the actual spoken phrase is still "Hey Jarvis" — that is the only
-pretrained keyword model openwakeword ships. Training a custom "Hey Avelia"
-model would need its own audio dataset and training run; until that exists,
-users either say "Hey Jarvis" to wake it or use push-to-talk instead.
+The spoken phrase is a custom-trained "Hey Avelia" model, not the pretrained
+"Hey Avelia" model openwakeword ships out of the box. The trained model is an
+ordinary ONNX file dropped in at config/wakewords/hey_avelia.onnx (see
+WAKE_MODEL_PATH below) — openwakeword happily loads a custom model by file
+path exactly the way it loads one of its own pretrained ones, so nothing else
+about the detection pipeline changes.
 
 Design goals:
   • ZERO cost when the feature is off — openwakeword is imported ONLY inside
@@ -15,10 +17,14 @@ Design goals:
     this module's own background thread, so the real-time audio thread and the
     Gemini stream are never slowed.
   • Fully local & offline — audio fed here never leaves the machine; there is no
-    network call except the one-time model download the user triggers from the UI.
+    network call except the one-time download (of openwakeword's shared
+    melspectrogram/embedding feature-extraction models) the user triggers from
+    the UI. The wake model itself never touches the network — it's already on
+    disk.
 
-openwakeword ships small ONNX models (a few MB each) and runs comfortably on a
-CPU. The pretrained wake phrase used here is "Hey Jarvis".
+openwakeword's shared melspectrogram/embedding models are a few MB each and run
+comfortably on a CPU; the custom "Hey Avelia" model is a similarly small ONNX
+file trained separately (see the project's wake-word training notes).
 """
 from __future__ import annotations
 
@@ -29,8 +35,15 @@ import threading
 from pathlib import Path
 from typing import Callable
 
-# Pretrained openwakeword model that listens for "Hey Jarvis" (see note above).
-WAKE_MODEL = "hey_jarvis"
+# Custom-trained AVELIA wake model. WAKE_MODEL_NAME is just a label used for
+# logging and for matching the right key in the scores dict openwakeword
+# returns (it keys detections by the model's file stem); WAKE_MODEL_PATH is
+# where the actual .onnx file must live. Drop the file trained via the
+# openWakeWord Colab/Kaggle notebook at this exact path — nothing downloads it
+# automatically, since it's specific to this install, not a public pretrained
+# model.
+WAKE_MODEL_NAME = "hey_avelia"
+WAKE_MODEL_PATH = Path(__file__).resolve().parent.parent / "config" / "wakewords" / "hey_avelia.onnx"
 # Score in [0,1]; above this counts as a detection. Tunable per environment.
 DEFAULT_THRESHOLD = 0.5
 # Mic frames arrive at 16 kHz int16; this is just the detector's input rate.
@@ -47,7 +60,8 @@ def is_installed() -> bool:
 
 
 def is_ready() -> bool:
-    """True if openwakeword is installed AND its model files are present on disk.
+    """True if openwakeword is installed, its shared feature-extraction models
+    are present, AND the custom Hey Avelia model file is on disk.
 
     This is a cheap, DETERMINISTIC file-existence check. It deliberately does NOT
     construct a Model to probe readiness — doing that is slow and, worse, can clash
@@ -56,18 +70,18 @@ def is_ready() -> bool:
     """
     if not is_installed():
         return False
+    if not WAKE_MODEL_PATH.is_file():
+        return False
     try:
         import openwakeword
         models_dir = Path(openwakeword.__file__).resolve().parent / "resources" / "models"
         if not models_dir.is_dir():
             return False
-        has_wake = (any(models_dir.glob(f"{WAKE_MODEL}*.onnx"))
-                    or any(models_dir.glob(f"{WAKE_MODEL}*.tflite")))
         has_mel = (any(models_dir.glob("melspectrogram*.onnx"))
                    or any(models_dir.glob("melspectrogram*.tflite")))
         has_emb = (any(models_dir.glob("embedding_model*.onnx"))
                    or any(models_dir.glob("embedding_model*.tflite")))
-        return bool(has_wake and has_mel and has_emb)
+        return bool(has_mel and has_emb)
     except Exception:
         return False
 
@@ -76,8 +90,11 @@ def install_and_download(logger: Callable[[str], None] = print,
                          notify: Callable[[str], None] | None = None) -> tuple[bool, str]:
     """
     One-click setup for the UI button: pip-install openwakeword if missing, then
-    download the wake model. Returns (ok, message). Never raises — every failure
-    is reported through the returned message and the logger.
+    download openwakeword's shared feature-extraction models (melspectrogram +
+    embedding — the custom Hey Avelia model itself is never downloaded here, it
+    must already be sitting at WAKE_MODEL_PATH). Returns (ok, message). Never
+    raises — every failure is reported through the returned message and the
+    logger.
     """
     _tell = notify or (lambda _msg: None)
     try:
@@ -91,18 +108,22 @@ def install_and_download(logger: Callable[[str], None] = print,
             if r.returncode != 0:
                 tail = (r.stderr or r.stdout or "").strip().splitlines()[-1:] or [""]
                 return False, f"pip install failed: {tail[0][:160]}"
-        # Download the pretrained melspectrogram/embedding + wake models.
-        logger("Wake word: downloading models…")
-        _tell("Wake word: downloading models…")
+        # Download the shared melspectrogram/embedding feature-extraction models
+        # (these are the same for every wake word, custom or pretrained).
+        logger("Wake word: downloading feature-extraction models…")
+        _tell("Wake word: downloading feature-extraction models…")
         try:
             import openwakeword.utils as _u
             try:
-                _u.download_models([WAKE_MODEL])
+                _u.download_models(["melspectrogram", "embedding_model"])
             except TypeError:
                 _u.download_models()   # older signature downloads the default set
         except Exception as e:
             return False, f"model download failed: {e}"
 
+        if not WAKE_MODEL_PATH.is_file():
+            return False, (f"custom wake model not found — place hey_avelia.onnx at "
+                            f"{WAKE_MODEL_PATH}")
         if not is_ready():
             return False, "installed, but the wake model could not be loaded."
         logger("Wake word: ready.")
@@ -139,9 +160,13 @@ class WakeWordDetector:
         Safe to call again — a no-op if already running. Never raises."""
         if self._running:
             return True
+        if not WAKE_MODEL_PATH.is_file():
+            self._logger(f"Wake word: model file missing — {WAKE_MODEL_PATH}")
+            self._notify("Wake word unavailable — use the WAKE NOW button.")
+            return False
         try:
             from openwakeword.model import Model
-            self._model = Model(wakeword_models=[WAKE_MODEL], inference_framework="onnx")
+            self._model = Model(wakeword_models=[str(WAKE_MODEL_PATH)], inference_framework="onnx")
         except Exception as e:
             self._logger(f"Wake word: could not load model — {e}")
             self._notify("Wake word unavailable — use the WAKE NOW button.")
@@ -151,7 +176,7 @@ class WakeWordDetector:
         self._ready = True
         self._thread = threading.Thread(target=self._loop, daemon=True, name="WakeWordThread")
         self._thread.start()
-        self._logger("Wake word: listening for 'Hey Jarvis'.")
+        self._logger("Wake word: listening for 'Hey Avelia'.")
         return True
 
     def stop(self) -> None:

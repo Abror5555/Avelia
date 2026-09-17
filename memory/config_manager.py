@@ -78,8 +78,8 @@ def save_assistant_config(assistant_name: str, user_name: str) -> None:
 # ── Assistant voice ──────────────────────────────────────────────────────────
 # Gemini Live prebuilt voices. Names are proper nouns — identical in every
 # language, so this list is safe to show verbatim in any locale.
-AVAILABLE_VOICES = ["Charon", "Puck", "Kore", "Fenrir", "Aoede"]
-DEFAULT_VOICE    = "Charon"
+AVAILABLE_VOICES = ["Despina", "Charon", "Puck", "Kore", "Fenrir", "Aoede"]
+DEFAULT_VOICE    = "Despina"
 
 
 def get_voice() -> str:
@@ -105,7 +105,7 @@ def save_voice(voice_name: str) -> None:
 
 
 def get_wake_word_enabled() -> bool:
-    """Whether local wake-word gating is on (assistant sleeps until 'Hey Jarvis')."""
+    """Whether local wake-word gating is on (assistant sleeps until 'Hey Avelia')."""
     return load_api_keys().get("wake_word_enabled", False)
 
 

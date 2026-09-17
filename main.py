@@ -530,7 +530,7 @@ def _keep_context_of(exc: BaseException) -> bool:
 class AveliaLive:
     def __init__(self, ui: AveliaUI):
         self.ui             = ui
-        self._asst_name     = "JARVI    S"   # updated each session from config
+        self._asst_name     = "Avelia"   # updated each session from config
         self.session              = None
         self.audio_in_queue       = None
         self.out_queue            = None
@@ -673,7 +673,7 @@ class AveliaLive:
         return True
 
     def _on_wake_detected(self) -> None:
-        """Called from the detector thread when 'Hey Jarvis' is heard."""
+        """Called from the detector thread when 'Hey Avelia' is heard."""
         self.wake(reason="wake word")
 
     def wake(self, reason: str = "wake word") -> None:
@@ -691,7 +691,7 @@ class AveliaLive:
         self._awake = False
         self.set_speaking(False)
         self.ui.set_state("SLEEPING")
-        self.ui.write_log(f"SYS: Sleeping — {reason}. Say 'Hey Jarvis' to wake me.")
+        self.ui.write_log(f"SYS: Sleeping — {reason}. Say 'Hey Avelia' to wake me.")
 
     async def _run_sleep_watch(self) -> None:
         """Auto-sleep after the configured silence window (wake-word mode only)."""
@@ -833,9 +833,9 @@ class AveliaLive:
             return
         # Respect wake-word sleep: a typed command must not be answered while
         # asleep either (the sleep gate is not just for the mic). Wake first with
-        # "Hey Jarvis" or the WAKE NOW button.
+        # "Hey Avelia" or the WAKE NOW button.
         if self._wake_enabled and not self._awake:
-            self.ui.write_log("SYS: I'm asleep — say 'Hey Jarvis' or tap WAKE NOW first.")
+            self.ui.write_log("SYS: I'm asleep — say 'Hey Avelia' or tap WAKE NOW first.")
             return
         asyncio.run_coroutine_threadsafe(
             self.session.send_client_content(
@@ -2066,6 +2066,25 @@ class AveliaLive:
         # for host-API enumeration on the Qt thread.
         audio_devices.prefetch()
 
+        # ── Voice lock ──────────────────────────────────────────────────────
+        # Runs ONCE per launch, before the connect loop — not inside it, or a
+        # dropped packet at 2am would demand four seconds of speech from an
+        # empty room before Avelia could come back.
+        #
+        # It also has to finish before the session opens: the gate takes the
+        # microphone exclusively, and _listen_audio() opens it again. Two
+        # streams on one device fail on Windows WASAPI.
+        #
+        # Listens on the SAME device _listen_audio() will use — recording from
+        # the system default while Avelia listens on a headset would score four
+        # seconds of silence from the wrong microphone and reject a good voice.
+        from core import voice_lock
+        if not await voice_lock.require_owner(
+            self.ui, device=audio_devices.resolve(get_input_device(), "input")
+        ):
+            self.ui.write_log("SYS: Ovoz tasdiqlanmadi — tizim to'xtatildi.")
+            return
+
         # Start dashboard (optional — needs: pip install fastapi "uvicorn[standard]" cryptography)
         try:
             from dashboard.server import DashboardServer
@@ -2118,12 +2137,12 @@ class AveliaLive:
                         self.ui.write_log("SYS: Reconnected — conversation restored.")
 
                     # Wake word: if enabled, come up ASLEEP (mic gated, silent)
-                    # until the user says "Hey Jarvis" or taps wake in the UI.
+                    # until the user says "Hey Avelia" or taps wake in the UI.
                     if self._wake_enabled:
                         self._ensure_wake_detector()
                         self._awake = False
                         self.ui.set_state("SLEEPING")
-                        self.ui.write_log("SYS: AVELIA online — sleeping. Say 'Hey Jarvis' to wake me.")
+                        self.ui.write_log("SYS: AVELIA online — sleeping. Say 'Hey Avelia' to wake me.")
                     else:
                         self._awake = True
                         self.ui.set_state("LISTENING")
