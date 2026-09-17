@@ -1,5 +1,10 @@
 """
-Local wake-word detection for JARVIS ("Hey Jarvis").
+Local wake-word detection for AVELIA.
+
+NOTE: the actual spoken phrase is still "Hey Jarvis" — that is the only
+pretrained keyword model openwakeword ships. Training a custom "Hey Avelia"
+model would need its own audio dataset and training run; until that exists,
+users either say "Hey Jarvis" to wake it or use push-to-talk instead.
 
 Design goals:
   • ZERO cost when the feature is off — openwakeword is imported ONLY inside
@@ -24,7 +29,7 @@ import threading
 from pathlib import Path
 from typing import Callable
 
-# Pretrained openwakeword model that listens for "Hey Jarvis".
+# Pretrained openwakeword model that listens for "Hey Jarvis" (see note above).
 WAKE_MODEL = "hey_jarvis"
 # Score in [0,1]; above this counts as a detection. Tunable per environment.
 DEFAULT_THRESHOLD = 0.5
@@ -187,9 +192,9 @@ class WakeWordDetector:
                 scores = self._model.predict(np.asarray(frame, dtype=np.int16))
                 score = 0.0
                 if isinstance(scores, dict):
-                    # match the jarvis model regardless of exact key suffix
+                    # match the avelia model regardless of exact key suffix
                     for k, v in scores.items():
-                        if "jarvis" in k.lower():
+                        if "avelia" in k.lower():
                             score = max(score, float(v))
                     if score == 0.0 and scores:
                         score = max(float(v) for v in scores.values())
