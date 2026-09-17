@@ -1,5 +1,5 @@
 """
-ABROR — Dependency auto-installer.
+MARK XL — Dependency auto-installer.
 
 Called automatically on first launch and after engine reconfiguration.
 Installs only the packages that are actually missing, then exits cleanly.
@@ -22,7 +22,7 @@ _CORE: list[tuple[str, str]] = [
     ("numpy",              "numpy"),
     ("requests",           "requests"),
     ("bs4",                "beautifulsoup4"),
-    ("duckduckgo_search",  "duckduckgo-search"),
+    ("ddgs",               "ddgs"),
     ("pyautogui",          "pyautogui"),
     ("pyperclip",          "pyperclip"),
     ("pygetwindow",        "pygetwindow"),

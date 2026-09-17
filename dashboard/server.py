@@ -1,5 +1,5 @@
 """
-dashboard/server.py — AVELIA Local HTTP Dashboard
+dashboard/server.py — JARVIS Local HTTP Dashboard
 
 Plain HTTP on port 8000 (no SSL warnings, no firewall issues).
 Security at the application layer: AES-256-CBC with session-key-derived key.
@@ -44,8 +44,8 @@ MAX_UPLOAD_MB = 500
 def _make_uploads_dir() -> Path:
     """Return (and create) the cross-platform uploads folder."""
     for candidate in [
-        Path.home() / "Downloads" / "AVELIA Uploads",
-        Path.home() / "Documents" / "AVELIA Uploads",
+        Path.home() / "Downloads" / "JARVIS Uploads",
+        Path.home() / "Documents" / "JARVIS Uploads",
         BASE_DIR / "uploads",
     ]:
         try:
@@ -70,7 +70,7 @@ _KEY_CHARS = [c for c in (string.ascii_uppercase + string.digits)
               if c not in ('O', 'I', 'L', '0', '1')]
 
 # ── AES-256-CBC ───────────────────────────────────────────────────────────────
-_AES_SALT = b'AVELIA-DASHBOARD-v1'
+_AES_SALT = b'JARVIS-DASHBOARD-v1'
 
 
 def _derive_key(session_key: str) -> bytes:
@@ -112,8 +112,8 @@ def _ensure_network_access(port: int) -> None:
     if sys.platform == "win32":
         import ctypes, time
 
-        port_rule = f"AVELIA Dashboard Port {port}"
-        prog_rule  = "AVELIA Dashboard Python"
+        port_rule = f"JARVIS Dashboard Port {port}"
+        prog_rule  = "JARVIS Dashboard Python"
         py_exe     = sys.executable
 
         def _netsh_rule_exists(name: str) -> bool:
@@ -169,7 +169,7 @@ def _ensure_network_access(port: int) -> None:
             )
 
         bat_body = "\r\n".join(bat_lines) + "\r\n"
-        fd, bat_path = tempfile.mkstemp(suffix=".bat", prefix="avelia_fw_")
+        fd, bat_path = tempfile.mkstemp(suffix=".bat", prefix="jarvis_fw_")
         try:
             os.write(fd, bat_body.encode("mbcs"))   # Windows cmd.exe expects ANSI
             os.close(fd)
@@ -217,7 +217,7 @@ def _ensure_network_access(port: int) -> None:
                 print("[Dashboard] Refresh your phone browser to connect.")
             else:
                 print("[Dashboard] Setup was not allowed.")
-                print("[Dashboard] Phone connections may fail until AVELIA is run as Administrator.")
+                print("[Dashboard] Phone connections may fail until JARVIS is run as Administrator.")
         except Exception as e:
             print(f"[Dashboard] Firewall setup error: {e}")
         finally:
@@ -360,6 +360,93 @@ def _local_ip() -> str:
     return "127.0.0.1"
 
 
+def _ensure_certs() -> bool:
+    """
+    Make sure config/certs holds a TLS key pair, generating a self-signed one the
+    first time the dashboard runs.
+
+    The pair is deliberately NOT shipped in the repository. A private key that
+    every user downloads is the same as having no private key at all: anyone can
+    present a certificate that matches it. Generating locally gives each install
+    its own key, costs about a second, and happens exactly once.
+
+    Returns True when a usable pair exists afterwards; False leaves the caller on
+    plain HTTP, which still works — the QR code simply encodes http:// instead.
+    """
+    certs = BASE_DIR / "config" / "certs"
+    key_p = certs / "jarvis.key"
+    crt_p = certs / "jarvis.crt"
+    if key_p.exists() and crt_p.exists():
+        return True
+
+    try:
+        import datetime
+        import ipaddress
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.x509.oid import NameOID
+    except ImportError:
+        print("[Dashboard] cryptography not installed — serving over plain HTTP.")
+        print("[Dashboard] For HTTPS run:  pip install cryptography")
+        return False
+
+    try:
+        certs.mkdir(parents=True, exist_ok=True)
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+        who = x509.Name([
+            x509.NameAttribute(NameOID.COMMON_NAME, "JARVIS Dashboard"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "JARVIS"),
+        ])
+
+        # The SAN has to cover every address the phone might use: the LAN IP the
+        # QR code encodes, plus localhost when testing on the machine itself.
+        alt = [x509.DNSName("localhost"),
+               x509.IPAddress(ipaddress.IPv4Address("127.0.0.1"))]
+        try:
+            lan = _local_ip()
+            if not lan.startswith("127."):
+                alt.append(x509.IPAddress(ipaddress.IPv4Address(lan)))
+        except Exception:
+            pass          # no LAN address resolvable — localhost entries still work
+
+        # Timezone-aware UTC: datetime.utcnow() is deprecated from Python 3.12 on,
+        # and the builder normalises aware values to UTC itself.
+        now = datetime.datetime.now(datetime.timezone.utc)
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(who)
+            .issuer_name(who)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - datetime.timedelta(days=1))
+            .not_valid_after(now + datetime.timedelta(days=3650))
+            .add_extension(x509.SubjectAlternativeName(alt), critical=False)
+            .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+            .sign(key, hashes.SHA256())
+        )
+
+        key_p.write_bytes(key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption(),
+        ))
+        crt_p.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+
+        try:
+            import os as _os
+            _os.chmod(key_p, 0o600)   # best effort — largely a no-op on Windows
+        except Exception:
+            pass
+
+        print(f"[Dashboard] Generated a self-signed certificate for this machine: {certs}")
+        return True
+    except Exception as e:
+        print(f"[Dashboard] Certificate generation failed ({e}) — serving over plain HTTP.")
+        return False
+
+
 def _read(name: str) -> str:
     return (STATIC_DIR / name).read_text(encoding="utf-8")
 
@@ -398,7 +485,7 @@ class DashboardServer:
     @staticmethod
     def _ssl_enabled() -> bool:
         certs = BASE_DIR / "config" / "certs"
-        return (certs / "avelia.key").exists() and (certs / "avelia.crt").exists()
+        return (certs / "jarvis.key").exists() and (certs / "jarvis.crt").exists()
 
     def get_url(self) -> str:
         proto = "https" if self._ssl_enabled() else "http"
@@ -512,7 +599,7 @@ class DashboardServer:
   h2{color:#f87171;margin-bottom:12px}p{color:#5e6a7e;font-size:14px}
 </style></head>
 <body><div><h2>Link Expired</h2>
-<p>Press <strong style="color:#dde3ed">Remote Control</strong> in AVELIA to get a new QR code.</p>
+<p>Press <strong style="color:#dde3ed">Remote Control</strong> in JARVIS to get a new QR code.</p>
 </div></body></html>""")
 
             del self._pending_keys[key]
@@ -538,12 +625,12 @@ class DashboardServer:
 </style></head>
 <body>
 <script>
-  sessionStorage.setItem('avelia_token','{tok}');
-  sessionStorage.setItem('avelia_key','{key}');
-  localStorage.setItem('avelia_device_token','{dev_tok}');
+  sessionStorage.setItem('jarvis_token','{tok}');
+  sessionStorage.setItem('jarvis_key','{key}');
+  localStorage.setItem('jarvis_device_token','{dev_tok}');
   setTimeout(function(){{location.replace('/')}},400);
 </script>
-<p>Connecting to AVELIA…</p>
+<p>Connecting to JARVIS…</p>
 </body></html>""")
 
         @app.post("/api/device-login")
@@ -756,8 +843,8 @@ class DashboardServer:
         """Second HTTPS server on PORT+1 sharing the same app and in-memory state.
         Chrome HTTPS-upgrades any bare IP:PORT the user types, so this port also needs TLS.
         User types IP:8001 → Chrome tries https → self-signed cert warning → accept once → done."""
-        ssl_key  = BASE_DIR / "config" / "certs" / "avelia.key"
-        ssl_cert = BASE_DIR / "config" / "certs" / "avelia.crt"
+        ssl_key  = BASE_DIR / "config" / "certs" / "jarvis.key"
+        ssl_cert = BASE_DIR / "config" / "certs" / "jarvis.crt"
         asyncio.get_event_loop().run_in_executor(None, _ensure_network_access, PORT + 1)
         cfg = uvicorn.Config(
             self.app, host="0.0.0.0", port=PORT + 1, log_level="warning",
@@ -776,9 +863,12 @@ class DashboardServer:
         # no waiting for UAC dialogs or subprocess timeouts.
         asyncio.get_event_loop().run_in_executor(None, _ensure_network_access, PORT)
 
+        # Generate the TLS pair on first run so no private key ships in the repo.
+        _ensure_certs()
+
         use_ssl  = self._ssl_enabled()
-        ssl_key  = BASE_DIR / "config" / "certs" / "avelia.key"
-        ssl_cert = BASE_DIR / "config" / "certs" / "avelia.crt"
+        ssl_key  = BASE_DIR / "config" / "certs" / "jarvis.key"
+        ssl_cert = BASE_DIR / "config" / "certs" / "jarvis.crt"
 
         if use_ssl:
             asyncio.create_task(self._serve_alias())
@@ -790,5 +880,5 @@ class DashboardServer:
 
         proto = "https" if use_ssl else "http"
         print(f"[Dashboard] {proto}://{self._ip}:{PORT}")
-        print("[Dashboard] Press 'Remote Control' in AVELIA UI to get the QR code.")
+        print("[Dashboard] Press 'Remote Control' in JARVIS UI to get the QR code.")
         await uvicorn.Server(cfg).serve()

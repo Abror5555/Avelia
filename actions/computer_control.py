@@ -62,7 +62,7 @@ _SAFE_SCREENSHOT_ROOTS = (
 )
 
 def _safe_screenshot_path(requested: str | None) -> Path:
-    fallback = Path.home() / "Desktop" / "avelia_screenshot.png"
+    fallback = Path.home() / "Desktop" / "jarvis_screenshot.png"
     if not requested:
         return fallback
     try:
@@ -327,7 +327,6 @@ def _screen_find(description: str) -> tuple[int, int] | None:
         img.save(buf, format="PNG")
         image_bytes = buf.getvalue()
 
-        client = genai.Client(api_key=api_key)
         prompt = (
             f"This is a screenshot of a {w}×{h} pixel screen. "
             f"Locate the UI element described as: '{description}'. "
@@ -335,13 +334,13 @@ def _screen_find(description: str) -> tuple[int, int] | None:
             f"If the element is not visible, reply: NOT_FOUND"
         )
 
-        response = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=[
-                gtypes.Part.from_bytes(data=image_bytes, mime_type="image/png"),
-                prompt,
-            ],
+        from core import gemini
+        response = gemini.call(
+            [gtypes.Part.from_bytes(data=image_bytes, mime_type="image/png"), prompt],
+            tier=gemini.FAST, timeout_ms=20_000,
         )
+        if response is None:
+            return None
 
         text = (response.text or "").strip()
         if "NOT_FOUND" in text.upper():
@@ -512,3 +511,79 @@ def computer_control(
     except Exception as e:
         print(f"[ComputerControl] ❌ {action}: {e}")
         return f"computer_control '{action}' failed: {e}"
+
+
+# ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
+TOOL = {
+    "name": "computer_control",
+    "description": "Direct computer control: type, click, hotkeys, scroll, move mouse, screenshots, find elements on screen.",
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action": {
+                "type": "STRING",
+                "description": "type | smart_type | click | double_click | right_click | hotkey | press | scroll | move | copy | paste | screenshot | wait | clear_field | focus_window | screen_find | screen_click | random_data | user_data"
+            },
+            "text": {
+                "type": "STRING",
+                "description": "Text to type or paste"
+            },
+            "x": {
+                "type": "INTEGER",
+                "description": "X coordinate"
+            },
+            "y": {
+                "type": "INTEGER",
+                "description": "Y coordinate"
+            },
+            "keys": {
+                "type": "STRING",
+                "description": "Key combination e.g. 'ctrl+c'"
+            },
+            "key": {
+                "type": "STRING",
+                "description": "Single key e.g. 'enter'"
+            },
+            "direction": {
+                "type": "STRING",
+                "description": "up | down | left | right"
+            },
+            "amount": {
+                "type": "INTEGER",
+                "description": "Scroll amount (default: 3)"
+            },
+            "seconds": {
+                "type": "NUMBER",
+                "description": "Seconds to wait"
+            },
+            "title": {
+                "type": "STRING",
+                "description": "Window title for focus_window"
+            },
+            "description": {
+                "type": "STRING",
+                "description": "Element description for screen_find/screen_click"
+            },
+            "type": {
+                "type": "STRING",
+                "description": "Data type for random_data"
+            },
+            "field": {
+                "type": "STRING",
+                "description": "Field for user_data: name|email|city"
+            },
+            "clear_first": {
+                "type": "BOOLEAN",
+                "description": "Clear field before typing (default: true)"
+            },
+            "path": {
+                "type": "STRING",
+                "description": "Save path for screenshot"
+            }
+        },
+        "required": [
+            "action"
+        ]
+    },
+    "handler": computer_control,
+}

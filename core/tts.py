@@ -1,5 +1,5 @@
 """
-Text-to-Speech engines for ABROR.
+Text-to-Speech engines for MARK XL.
 
 EdgeTTS     – free Microsoft TTS (internet required, no API key)
 Kokoro      – fully offline neural TTS (~330 MB model)

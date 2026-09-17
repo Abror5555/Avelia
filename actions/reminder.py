@@ -19,13 +19,12 @@ def _base_dir() -> Path:
 
 
 def _get_os() -> str:
-    try:
-        cfg = json.loads(
-            (_base_dir() / "config" / "api_keys.json").read_text(encoding="utf-8")
-        )
-        return cfg.get("os_system", "windows").lower()
-    except Exception:
-        return "windows"
+    _sys = platform.system()
+    if _sys == "Darwin":
+        return "mac"
+    if _sys == "Linux":
+        return "linux"
+    return "windows"
 
 
 def _scripts_dir() -> Path:
@@ -336,3 +335,33 @@ def reminder(
 
     friendly_time = target_dt.strftime("%B %d at %I:%M %p")
     return f"Reminder set for {friendly_time}."
+
+
+# ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
+TOOL = {
+    "name": "reminder",
+    "description": "Sets a timed reminder using Task Scheduler.",
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "date": {
+                "type": "STRING",
+                "description": "Date in YYYY-MM-DD format"
+            },
+            "time": {
+                "type": "STRING",
+                "description": "Time in HH:MM format (24h)"
+            },
+            "message": {
+                "type": "STRING",
+                "description": "Reminder message text"
+            }
+        },
+        "required": [
+            "date",
+            "time",
+            "message"
+        ]
+    },
+    "handler": reminder,
+}
